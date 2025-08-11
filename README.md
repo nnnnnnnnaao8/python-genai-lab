@@ -77,6 +77,13 @@ git push -u origin main
 python -m pytest -q
 ```
 
+# python-genai-lab
+最小のETL（抽出→変換→保存）パイプライン。
+
+実行:
+`python -m src.etl --in data/raw/sample.csv --out data/processed/summary.csv --fig artifacts/eda_fig.png --verbose`
+
+
 ---
 
 ## 用語：どこに入力？
