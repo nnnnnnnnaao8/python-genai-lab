@@ -35,15 +35,41 @@ class Cleaner:
 
 
 @dataclass
+class Standardizer:
+    col: str = "value"
+    make_new_col: bool = True  # Trueなら value_z を追加
+
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        out = df.copy()
+        if self.col not in out.columns:
+            return out
+        s = out[self.col]
+        mu, sigma = float(s.mean()), float(s.std() or 0.0)
+        if sigma == 0.0:
+            return out
+        z = (s - mu) / sigma
+        if self.make_new_col:
+            out[self.col + "_z"] = z
+        else:
+            out[self.col] = z
+        return out
+
+
+@dataclass
 class Plotter:
-    def plot(self, df: pd.DataFrame, fig_path: Path) -> None:
-        if "value" not in df.columns:
-            return
-        plt.figure()
-        df["value"].hist(bins=10)
-        fig_path.parent.mkdir(parents=True, exist_ok=True)
-        plt.savefig(fig_path)
-        plt.close()
+    def plot(self, df: pd.DataFrame, fig_path: Path, box_path: Path | None = None) -> None:
+        if "value" in df.columns:
+            plt.figure()
+            df["value"].hist(bins=10)
+            fig_path.parent.mkdir(parents=True, exist_ok=True)
+            plt.savefig(fig_path)
+            plt.close()
+        if box_path is not None and "value" in df.columns:
+            plt.figure()
+            df["value"].plot(kind="box")
+            box_path.parent.mkdir(parents=True, exist_ok=True)
+            plt.savefig(box_path)
+            plt.close()
 
 
 def aggregate(df: pd.DataFrame, mode: str = "mean") -> pd.DataFrame:
@@ -72,10 +98,17 @@ def main() -> None:
     ap.add_argument("--verbose", action="store_true", help="途中経過を表示")
     ap.add_argument("--show", action="store_true", help="図を画面に表示")
     ap.set_defaults(drop_duplicates=True)
+    ap.add_argument("--scale", action="store_true", help="value列をzスコアで標準化（value_zを追加）")
+    ap.add_argument("--no-scale", dest="scale", action="store_false")
+    ap.add_argument("--fig2", dest="fig2_path", type=Path, required=False, help="箱ひげ図の保存先（省略可）")
+
+
     args = ap.parse_args()
 
     loader = DataLoader()
     cleaner = Cleaner(drop_na_cols=["value"], drop_duplicates=args.drop_duplicates)
+
+
     plotter = Plotter()
 
     if args.verbose: print(f"[1/4] Load: {args.in_path}")
@@ -83,6 +116,11 @@ def main() -> None:
 
     if args.verbose: print("[2/4] Clean")
     df_clean = cleaner.clean(df)
+    
+    std = Standardizer(col="value", make_new_col=True)
+    if args.scale:
+        if args.verbose: print("[2.5/4] Standardize (z-score) -> value_z")
+        df_clean = std.transform(df_clean)
 
     if args.verbose: print(f"[3/4] Aggregate -> {args.out_path} (mode={args.agg})")
     summary = aggregate(df_clean, mode=args.agg)
@@ -90,7 +128,8 @@ def main() -> None:
     summary.to_csv(args.out_path, index=False)
 
     if args.verbose: print(f"[4/4] Figure -> {args.fig_path}")
-    plotter.plot(df_clean, args.fig_path)
+    plotter.plot(df_clean, args.fig_path, box_path=args.fig2_path)
+
 
     if args.show:
         plt.figure()
