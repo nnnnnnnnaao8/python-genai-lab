@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
+import os
+from datetime import datetime as dt
+
 
 
 @dataclass
@@ -101,6 +104,9 @@ def main() -> None:
     ap.add_argument("--scale", action="store_true", help="value列をzスコアで標準化（value_zを追加）")
     ap.add_argument("--no-scale", dest="scale", action="store_false")
     ap.add_argument("--fig2", dest="fig2_path", type=Path, required=False, help="箱ひげ図の保存先（省略可）")
+    ap.add_argument("--report", type=Path, default=None, help="実行レポートを保存する先（.txt推奨）")
+    ap.add_argument("--open", dest="auto_open", action="store_true", help="終了後に成果物を自動で開く（Windows）")
+
 
 
     args = ap.parse_args()
@@ -129,6 +135,65 @@ def main() -> None:
 
     if args.verbose: print(f"[4/4] Figure -> {args.fig_path}")
     plotter.plot(df_clean, args.fig_path, box_path=args.fig2_path)
+
+    # ---- 実感の出る要約を作成 ----
+    raw_rows = len(df)
+    after_dropna = len(df.dropna(subset=["value"])) if "value" in df.columns else raw_rows
+    after_clean = len(df_clean)
+    dup_removed = max(after_dropna - after_clean, 0) if args.drop_duplicates else 0
+
+    stats_lines = []
+    if "value" in df_clean.columns:
+        s = df_clean["value"].dropna()
+        if len(s) > 0:
+            stats_lines.append(f"value: count={len(s)} mean={s.mean():.2f} median={s.median():.2f} std={s.std():.2f} min={s.min():.2f} max={s.max():.2f}")
+    if "category" in df_clean.columns:
+        top = df_clean["category"].value_counts(dropna=False).head(3)
+        top_str = ", ".join([f"{idx}:{cnt}" for idx, cnt in top.items()])
+        stats_lines.append(f"top categories: {top_str}")
+
+    summary_head = ""
+    try:
+        summary_head = summary.head(5).to_csv(index=False).strip()
+    except Exception:
+        pass
+
+    digest = (
+        "=== ETL RUN SUMMARY ===\n"
+        f"when      : {dt.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"in        : {args.in_path}\n"
+        f"out       : {args.out_path}\n"
+        f"figure    : {args.fig_path}\n"
+        f"mode      : agg={args.agg} drop_duplicates={args.drop_duplicates} scale={getattr(args,'scale',False)}\n"
+        f"rows      : raw={raw_rows} -> dropna={after_dropna} -> clean={after_clean} (dups_removed~{dup_removed})\n"
+        + ("\n".join(stats_lines) + "\n" if stats_lines else "")
+        + ("--- summary head (first 5 rows) ---\n" + summary_head + "\n" if summary_head else "")
+    )
+
+    print(digest)
+
+    # レポート保存（指定があれば）
+    if args.report is not None:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        with open(args.report, "w", encoding="utf-8") as f:
+            f.write(digest)
+        print(f"[report] wrote {args.report}")
+
+    # 自動で開く（Windows想定）
+    if getattr(args, "auto_open", False):
+        try:
+            os.startfile(str(args.fig_path))        # 図
+        except Exception:
+            pass
+        try:
+            os.startfile(str(args.out_path))        # CSV
+        except Exception:
+            pass
+        if args.report is not None:
+            try:
+                os.startfile(str(args.report))      # レポート
+            except Exception:
+                pass
 
 
     if args.show:
