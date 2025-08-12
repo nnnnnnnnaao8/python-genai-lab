@@ -106,6 +106,8 @@ def main() -> None:
     ap.add_argument("--fig2", dest="fig2_path", type=Path, required=False, help="箱ひげ図の保存先（省略可）")
     ap.add_argument("--report", type=Path, default=None, help="実行レポートを保存する先（.txt推奨）")
     ap.add_argument("--open", dest="auto_open", action="store_true", help="終了後に成果物を自動で開く（Windows）")
+    ap.add_argument("--head", type=int, default=None, help="出力CSVを先頭N行に制限")
+
 
 
 
@@ -130,6 +132,10 @@ def main() -> None:
 
     if args.verbose: print(f"[3/4] Aggregate -> {args.out_path} (mode={args.agg})")
     summary = aggregate(df_clean, mode=args.agg)
+   
+    if args.head is not None:
+        summary = summary.head(args.head)
+   
     args.out_path.parent.mkdir(parents=True, exist_ok=True)
     summary.to_csv(args.out_path, index=False)
 
