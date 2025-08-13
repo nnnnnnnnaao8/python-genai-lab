@@ -89,6 +89,22 @@ def aggregate(df: pd.DataFrame, mode: str = "mean") -> pd.DataFrame:
     )
     return grouped
 
+# 関数だけでOK：前処理済みデータの基本統計を辞書で返す
+def compute_stats(df):
+    stats = {}
+    if "value" in df.columns:
+        s = df["value"].dropna()
+        if len(s) > 0:
+            stats = {
+                "count": int(len(s)),
+                "mean": float(s.mean()),
+                "median": float(s.median()),
+                "std": float(s.std()),
+                "min": float(s.min()),
+                "max": float(s.max()),
+            }
+    return stats
+
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Minimal ETL pipeline")
@@ -107,6 +123,7 @@ def main() -> None:
     ap.add_argument("--report", type=Path, default=None, help="実行レポートを保存する先（.txt推奨）")
     ap.add_argument("--open", dest="auto_open", action="store_true", help="終了後に成果物を自動で開く（Windows）")
     ap.add_argument("--head", type=int, default=None, help="出力CSVを先頭N行に制限")
+    ap.add_argument("--stats-out", type=Path, default=None, help="基本統計をJSONで保存する先（省略可）")
 
 
 
@@ -125,6 +142,12 @@ def main() -> None:
     if args.verbose: print("[2/4] Clean")
     df_clean = cleaner.clean(df)
     
+    # 前処理後の統計を関数で計算（クラスは使わない）
+    stats = compute_stats(df_clean)
+    if args.verbose:
+        print(f"[stats] {stats}")
+
+
     std = Standardizer(col="value", make_new_col=True)
     if args.scale:
         if args.verbose: print("[2.5/4] Standardize (z-score) -> value_z")
@@ -200,6 +223,15 @@ def main() -> None:
                 os.startfile(str(args.report))      # レポート
             except Exception:
                 pass
+
+    # 統計をJSONに保存（指定があれば）
+    if args.stats_out is not None and stats:
+        args.stats_out.parent.mkdir(parents=True, exist_ok=True)
+        import json
+        with open(args.stats_out, "w", encoding="utf-8") as f:
+            json.dump(stats, f, ensure_ascii=False, indent=2)
+        if args.verbose:
+            print(f"[stats] wrote {args.stats_out}")
 
 
     if args.show:
