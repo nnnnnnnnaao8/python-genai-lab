@@ -5,3 +5,22 @@ artifacts/
 data/processed/
 .pytest_cache/
 .ipynb_checkpoints/
+
+# Python
+__pycache__/
+*.pyc
+
+# 仮想環境
+.venv/
+
+# 実行産物／データ
+artifacts/
+data/index/
+data/processed/
+data/raw/docs/
+*.png
+*.csv
+
+# VS Code ノイズ
+.vscode/
+.ipynb_checkpoints/
