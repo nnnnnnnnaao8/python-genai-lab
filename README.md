@@ -90,4 +90,15 @@ python -m pytest -q
 - **VS Code のターミナル**：コマンドを打つ場所（PowerShell）。
 - **VS Code のエディタ**：`src/etl.py` など **コードを書く場所**。
 
+
+
+## 今日（8/17）の更新（RAG仕上げ）
+- 索引：concepts.txt 限定＋文単位分割（--sent-split）
+- 検索：埋め込み＋キーワード加点（score = sim + kw * 1.0）
+- 評価：`python -m src.eval_rag --in data/eval/questions.csv --k 5 --pool 120 --hybrid --kw-boost 1.0 --dyn-terms`
+  - 結果: pass@0.6 = 90% (9/10)  2025-08-16
+- デモ：`python rag_cli.py --hybrid --k 5 --pool 120 --kw-boost 1.0` → 「RAGとは」で回答＋出典表示
+
+
+
 困ったら、**打ったコマンドと赤字の最後の数行**を貼ってください。最短で直します。
