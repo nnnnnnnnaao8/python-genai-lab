@@ -19,28 +19,55 @@ import chromadb
 from chromadb.utils import embedding_functions
 
 # ---------- 日本語率の簡易判定 ----------
+# jp_ratio: 渡された文字列内の「日本語/許容記号」の比率（0〜1）を返すヘルパー。
+# この内容は使える文字範囲を指定するための文字クラス、具体的には日本語、英数字、記号類を許可するパターンになっている。
+#ちなみにPython では re.compile() を使って、正規表現を パターンオブジェクト にしておくことができます。
+#⇒そのオブジェクトには 作成したjp_ratio関数内にある .findall() などのメソッドが生えており、re.findallの形にする必要がない
 _JP_OK = re.compile(
     r"[\u3040-\u30FF\u4E00-\u9FFF\u0030-\u0039A-Za-z\s。、，．・：；？！「」『』（）\-\u3000-\u303F\uFF10-\uFF19\uFF21-\uFF3A\uFF41-\uFF5A]"
 )
+#上記は「日本語文章でよく使う文字だけを許可するフィルター」。
+#例えば入力文字列のバリデーションや「変な制御文字・絵文字・特殊記号を弾く」用途でよく使われます。
 
+
+#日本語率がどれほどかを計算している。
 def jp_ratio(text: str) -> float:
     if not text:
         return 0.0
-    valid = len(_JP_OK.findall(text))
+    valid = len(_JP_OK.findall(text)) #findallはreモジュールにある関数で指定した正規表現パターンに
+                                       #「マッチする部分文字列」をすべてリストで返すもの
+                                       #よってvalidは、引数textのうち日本語、許容記号がどれほどあるかを示す
     return valid / max(1, len(text))
 
+# is_garbled: 制御文字を間引いた上で日本語率が閾値未満かどうかを真偽で返す（ノイズ除外）。
+#引数はテキストと、最小日本語率(閾値)設定
 def is_garbled(text: str, min_ratio: float = 0.4) -> bool:
-    text = re.sub(r"[\u0000-\u001F]", " ", text)  # 制御文字は空白へ
+    text = re.sub(r"[\u0000-\u001F]", " ", text)  # 制御文字は空白へ \u0000-\u001Fが制御文字　re.subは変数textの制御文字を空白""にという関数
     return jp_ratio(text) < min_ratio
 
 # ---------- 文分割（日本語ざっくり） ----------
+# split_sentences_jp: 「。！？」などで大雑把に文分割し、短すぎる断片を除いて文リストを返す。
 def split_sentences_jp(text: str) -> list[str]:
-    t = re.sub(r"\s+", " ", (text or "").strip())
-    sents = re.findall(r"[^。！？\n]{2,}[。！？]", t) or []
+    t = re.sub(r"\s+", " ", (text or "").strip())#.strip()は文字列両端の空白改行を削除するメソッド
+             #r"\s" → 空白（スペース、タブ、改行など）。「+」は同じ種類の文字がまとめて繰り返されている部分をひとまとまりでとらえるということ
+            #従ってやってることは、変数tに引数text or 何もない文""の文字列両端の空白改行を削除した後に、改行と空白⇒" "を何もない⇒""状態にしたものを入れている
+    sents = re.findall(r"[^。！？\n]{2,}[。！？]", t) or [] #「少なくとも2文字以上の本文 + 文末記号（。 or ！ or ？）」という“文”っぽい塊を、t からすべて抜き出す。
+               #or [] は、findall が None を返すことはないけど、空リストに対して後続で安全に処理したい“保険”としてよく書かれるイディオム(慣用句)。                                            
     tail = re.sub(r".*[。！？]", "", t)
-    if len(tail) >= 6:
+                #r".*[。！？]" は、文字列全体のうち「最後に出現する 文末記号（。！？） まで」を貪欲にマッチします。
+                #.* が貪欲（greedy）なので、一番後ろの 。/！/？ まで飲み込みます。
+                #それを ""（空文字）に置換するので、**最後の文末記号“より後ろ”にある残り（端切れ）**だけが tail に残る、という仕掛け。
+    if len(tail) >= 6:  #端切れが6文字以上のとき、それも文にするよって内容
         sents.append(tail)
-    return [s.strip() for s in sents if len(s.strip()) >= 6]
+    return [s.strip() for s in sents if len(s.strip()) >= 6]#sents内の各文をstrip()して前後の空白削除。6文字未満は除外して返す。最終的に残るのは整形済みの文リスト
+
+
+# #上記「def split_sentences_jp(text: str) -> list[str]:」について小さな注意点・改善アイデア
+# 欧文の文末（. ! ?）は対象外：必要なら [。！？.!?] のように拡張を。
+# 連続する記号（例：！！）：現在は1文字ずつ区切るので、意図に応じて {1,2} など調整可。
+# 改行は既にスペースに畳んでいる：[^。！？\n] の \n は外しても同じ挙動。
+# 貪欲 .* の性質：tail 取得では「最後の」文末まで飛ぶのが狙いどおり。ただ、途中に非常に長いテキストがあっても問題ないかは要件次第。
+# パフォーマンス：頻繁に使うなら re.compile() しておくとわずかに効率化。(←いみわかんね)
 
 # ---------- パスやモデル ----------
 DOC_DIR   = Path("data/raw/docs")
@@ -50,27 +77,38 @@ COLL_NAME = "docs"
 EMB_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # 多言語対応
 
 # ---------- 整形＆文字数チャンク ----------
+# norm_ws: 連続空白を1つにし前後空白を削って正規化した文字列を返す。
 def norm_ws(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
 
-def chunk_text(text: str, size: int = 700, overlap: int = 100) -> List[str]:
-    out: List[str] = []
-    i = 0
-    n = len(text)
-    while i < n:
-        out.append(text[i:i+size])
-        i += max(size - overlap, 1)
-    return [norm_ws(t) for t in out if t.strip()]
 
-# ---------- include のマッチ（部分一致 or ワイルドカード） ----------
-def _match_include(name: str, include: str | None) -> bool:
-    if not include:
+# chunk_text: 文字数ベースで size 長・overlap 付きの窓をスライドし、正規化したチャンク文字列リストを返す。
+def chunk_text(text: str, size: int = 700, overlap: int = 100) -> List[str]:
+    out: List[str] = []    #出力用のリストoutを空で用意する。List[str]は文字列リストで返すよってこと
+    i = 0                  
+    n = len(text)   #引数で入力された文字列の長さをnに格納
+    while i < n:
+        out.append(text[i:i+size])      #開始位置iからsize文字分の部分文字列を切り出し
+        i += max(size - overlap, 1)     #次のチャンク開始位置を進める、チャンクの幅(オーバーラップ残して進む)デフォルトでは700-100＝600 overlap最小は1
+    return [norm_ws(t) for t in out if t.strip()] #if t.strip() → 空白だけのチャンクは除外。 norm_ws(t) → 文字列内の空白を正規化する関数
+
+
+
+# ---------- include のマッチ（部分一致 or ワイルドカード）(ファイル名フィルタ関数) ----------
+# _match_include: include がワイルドカードなら fnmatch、そうでなければ部分一致でファイル名をフィルタする。
+#部分一致はただ含まれているかどうかで、ワイルドカードは
+def _match_include(name: str, include: str | None) -> bool: #nameはファイル名 includeは指定したフィルタ条件(ワイルドカードか部分文字列かNone)　戻り値True or False
+    if not include: #includeがNoneや空文字なら フィルタ条件なし なので全部マッチ(条件に合致)とみなしてTrue
         return True
-    if any(ch in include for ch in "*?[]"):
+    if any(ch in include for ch in "*?[]"): #include に * ? [] のどれかが入っていたら「ワイルドカード指定」だと判定。
+                                            # → fnmatch.fnmatch(name, include) でマッチ判定する。
+                                            #    fnmatch はシェルのファイルパターン（glob）風にマッチングする関数。
+                                           #ちなみに、*..0文字以上の任意の文字列。?..任意の一文字
         return fnmatch.fnmatch(name, include)
-    return include.lower() in name.lower()
+    return include.lower() in name.lower() #それ以外の場合、部分一致と判定 大小文字区別せずに includeがnameの中に含まれてればTrue そうでなければFalse
 
 # ---------- 資料取り込み（ページ/大きめチャンク単位まで） ----------
+# read_docs: PDF はページ単位、TXT は全文を 1 単位として読み、(source_name, page_or_seq, text) のタプル一覧を返す。
 def read_docs(include: str | None = None) -> List[Tuple[str, int, str]]:
     """
     返り値: [(source_name, page_or_seq, text), ...]
@@ -118,6 +156,7 @@ def read_docs(include: str | None = None) -> List[Tuple[str, int, str]]:
     return items
 
 # ---------- 索引の作り直し ----------
+# rebuild_index: 資料読込→（文 or 文字）チャンク化→日本語率でスキップ→埋め込み→Chromaに add までを一括実行し、作成チャンク数を返す。
 def rebuild_index(
     chunk: int = 700,
     overlap: int = 100,
@@ -162,12 +201,14 @@ def rebuild_index(
     return len(rows)
 
 # ---------- 既存の索引を開く ----------
+# _open_collection: 永続ディレクトリからコレクションを取得して返す（同一埋め込み関数で開く）。
 def _open_collection() -> chromadb.Collection:
     client = chromadb.PersistentClient(path=str(INDEX_DIR))
     emb = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=EMB_MODEL)
     return client.get_collection(COLL_NAME, embedding_function=emb)
 
 # ---------- 検索 ----------
+# retrieve: 質問に対し Chroma から上位 k 件を取り出し、{id,text,distance,source,page,chunk} を持つ辞書リストで返す。
 def retrieve(query: str, k: int = 3) -> List[Dict[str, Any]]:
     coll = _open_collection()
     res = coll.query(query_texts=[query], n_results=k)
@@ -184,6 +225,7 @@ def retrieve(query: str, k: int = 3) -> List[Dict[str, Any]]:
     return hits
 
 # ---------- ハイブリッド再ランキング ----------
+# _keyword_score: terms 中のキーワードが含まれるたびに1点ずつ（上限5）を加点する単純スコアラー。
 def _keyword_score(text: str, terms: list[str]) -> float:
     if not terms:
         return 0.0
@@ -199,6 +241,7 @@ def _keyword_score(text: str, terms: list[str]) -> float:
             score += 1.0
     return score
 
+# retrieve_hybrid: 上位 pool 件の距離を 0〜1 に正規化→キーワード加点×kw_boost を合算→score 降順で並べ替え、上位 k 件を返す。
 def retrieve_hybrid(query: str, k: int = 3, terms: list[str] | None = None,
                     pool: int = 20, kw_boost: float = 0.3) -> list[dict[str, Any]]:
     base_hits = retrieve(query, k=pool)
@@ -231,6 +274,7 @@ def retrieve_hybrid(query: str, k: int = 3, terms: list[str] | None = None,
     return rescored[:k]
 
 # ---------- 回答 ----------
+# answer: （非LLM時）先頭ヒット本文の先頭約400文字＋出典一覧の文字列と、採用ヒットのリスト（辞書）を返す；LLM時は要約＋出典文字列。
 def answer(
     query: str,
     k: int = 3,
@@ -277,6 +321,7 @@ def answer(
         return f"{snippet}\n\n[出典: {srcs}]", hits
 
 # ---------- CLI ----------
+# main: CLI 引数を受け取り、--rebuild で索引再作成、--q で（ハイブリッド可）検索→ヒット表示→answer を出力する実行入口。
 def main():
     ap = argparse.ArgumentParser(description="最小RAG（1PDF/TXTから回答）")
     ap.add_argument("--rebuild", action="store_true", help="索引を作り直す")
